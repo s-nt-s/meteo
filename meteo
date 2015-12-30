@@ -1,4 +1,8 @@
 #!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
 use XML::Simple;
 use LWP::Simple;
 
@@ -67,11 +71,25 @@ sub prt {
     my $msg="= ". $_[0] . " =";
     my $z=int((20 - $len)/2);
     if ($z >0) {
-	for ($count = $z ; $count > 0; $count--) {$msg="=" . $msg . "=";}
+	for (my $count = $z ; $count > 0; $count--) {$msg="=" . $msg . "=";}
 	if (($len % 2) == 1) {$msg=$msg . "=";}
     }
     print $msg . "\n";
 };
+
+sub cmparr {
+	my @a = $_[0];
+	my @b = $_[1];
+	if (@a != @b) {
+		return 0;
+	}
+	foreach (my $i = 0; $i < @a; $i++) {
+	    if ($a[$i] != $b[$i]) {
+	        return 0;
+	    }
+	}
+	return 1;
+}
 
 my $url = $ARGV[0] || '';
 
@@ -112,7 +130,7 @@ my $ct=uc($xml->{nombre});
 my @a=dataM($hoy,$gb,$sc);
 if ($gb != 6) {
    my @n=dataM($hoy,6,3);
-   $ig=@a ~~ @n;
+   $ig=cmparr(\@a, \@n);
    if (! $ig) {
       prt($ct);
       print "Ahora: ";
@@ -131,7 +149,7 @@ $ig=1;
 if ($gb == 0) {
    my @m=dataI($hoy,1);
    my @t=dataI($hoy,2);
-   $ig=@m ~~ @t;
+   $ig=cmparr(\@m, \@t);
    if (! $ig) {
       prt("HOY: mañana");
       showI(@m);
