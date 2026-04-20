@@ -35,9 +35,9 @@ sub showI {
     print "Temp. min./max.:\t" . $t1 . " / " . $t2;
     if (abs($t1-$s1)>1 || abs($t2-$s2)>1) {print " [" . $s1 . " / " . $s2 . "] ";}
     print "°C\n";
-    print "Precipitaciones:\t" . $_[5] . " %\n";
-    print "Humedad relativa:\t" . $_[6] . " / " . $_[7] . " %\n";
-    print "Viento:\t\t\t" . $_[8] . " km/h\n";
+    print "Precipitaciones:\t" . ($_[5] // "N/D"). " %\n";
+    print "Humedad relativa:\t" . ($_[6] // "N/D") . " / " . ($_[7] // "N/D") . " %\n";
+    print "Viento:\t\t\t" . ($_[8] // "N/D") . " km/h\n";
 };
 sub dataM {
     my $d=$_[0];
