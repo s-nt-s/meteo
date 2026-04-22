@@ -3,13 +3,33 @@ from urllib.request import urlopen
 import json
 from os.path import dirname, abspath, isfile, getmtime
 from time import time
+import re
+from typing import NamedTuple
+
 
 chdir(dirname(abspath(__file__)))
+
+
+class Data(NamedTuple):
+    estadoCielo: str #
+    precipitacion: int
+    probPrecipitacion: int #
+    probTormenta: int
+    nieve: int
+    probNieve: int
+    temperatura: int #
+    sensTermica: int #
+    humedadRelativa: int #
+    viento: int #
+    rachaMax: int
+    uvMax: int ##
+
 
 def load_env(path=".env"):
     if isfile(path):
         with open(path, "r", encoding="utf-8") as f:
             for line in map(str.strip, f.readlines()):
+                line = re.sub(r"^\s*export\s+", "", line)
                 if len(line) < 3 or line[0] == "#" or "=" not in line:
                     continue
                 key, value = line.split("=", 1)
@@ -88,9 +108,9 @@ def _provicina(nombre: str, provincia: str):
 
 class Meteo:
     def __init__(self, id: str, minutes_cache: int = 30):
-        self.__root = "https://opendata.aemet.es/opendata/api"
+        self.__root = "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio"
         self.__api_key = environ['AEMET_KEY']
-        self.__seconds_cache =  minutes_cache * 60
+        self.__seconds_cache = minutes_cache * 60
         self.__id = id
 
     def __get_json(self, url: str):
@@ -99,12 +119,12 @@ class Meteo:
         return d
 
     def __get_data(self, path: str) -> dict:
-        file = f".{path}{self.__id}.json"
+        file = f"cache/{self.__id}/{path}.json"
         if isfile(file) and (time() - getmtime(file)) <= self.__seconds_cache:
             with open(file, "r") as f:
                 return json.load(f)
 
-        url = f"{self.__root}{path}{self.__id}?api_key={self.__api_key}"
+        url = f"{self.__root}{path}/{self.__id}?api_key={self.__api_key}"
         data = self.__get_json(url)
         data = _parse(data)
         if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
@@ -122,12 +142,13 @@ class Meteo:
         with open(file, "w") as f:
             json.dump(data, f, indent=2)
         return data
-    
+
     def get_horaria(self):
-        return self.__get_data('/prediccion/especifica/municipio/horaria/')
+        return self.__get_data('/horaria')
 
     def get_diaria(self):
-        return self.__get_data('/prediccion/especifica/municipio/diaria/')
+        return self.__get_data('/diaria')
+
 
 if __name__ == "__main__":
     load_env()
