@@ -13,21 +13,23 @@ chdir(dirname(abspath(__file__)))
 
 
 class MinMax(NamedTuple):
-    min: int
-    max: int
+    min: float
+    max: float
 
 
 class Data(NamedTuple):
+    fecha: str
+    periodo: MinMax
     # Diaria/Horaria: Descripción del estado del cielo
     estadoCielo: str
     # Horaria: Milímetros (mm) de precipitación durante la hora anterior
-    precipitacion: int
+    precipitacion: float
     # Diaria/Horaria: % de probabilidad de precipitación
     probPrecipitacion: int
     # Horaria: % de probabilidad de tormenta
     probTormenta: int
     # Horaria: milímetros (mm) de nieve que se prevé que caiga durante la hora anterior
-    nieve: int
+    nieve: float
     # Horaria: % de probabilidad de precipitación de nieve
     probNieve: int
     # Horaria: Grados celsius
@@ -159,32 +161,103 @@ class Meteo:
                 return json.load(f)
 
         data = self.__get_json(path)
+        new_data = self.__parse_data(data)
+        if new_data is None:
+            raise ValueError(data)
+
+        makedirs(dirname(file), exist_ok=True)
+        with open(file, "w") as f:
+            json.dump(new_data, f, indent=2)
+        return data
+
+    def __parse_data(self, data: dict):
         data = _parse(data)
         if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
-            raise ValueError(data)
+            return None
         data = data[0]
+        dia = data['prediccion']['dia']
+        if not isinstance(dia, list) or len(dia) == 0:
+            return None
+        dias: dict[str, dict] = {}
+        for d in dia:
+            if not isinstance(d, dict):
+                return None
+            fecha = d.pop('fecha', None)
+            if fecha in dias:
+                return None
+            vr = d.pop('vientoAndRachaMax', None)
+            if vr:
+                if not isinstance(vr, list):
+                    return None
+                if set(d.keys()).intersection({"viento", "rachaMax"}):
+                    return None
+                d['viento'] = [x for x in vr if "direccion" in x]
+                d['rachaMax'] = [x for x in vr if "value" in x]
+            vi = d.pop('viento', None)
+            if vi:
+                if not isinstance(vi, list):
+                    return None
+                for v in vi:
+                    if not isinstance(v, dict) or "velocidad" not in v or "value" in v:
+                        return None
+                    v['value'] = v.pop('velocidad')
+                d['viento'] = vi
+            dias[fecha] = d
 
         data = {
             "id": data['id'],
             "elaborado": data['elaborado'],
             "provincia": _provicina(data['nombre'], data['provincia']),
-            **data['prediccion']
+            'prediccion': dias
         }
 
-        makedirs(dirname(file), exist_ok=True)
-        with open(file, "w") as f:
-            json.dump(data, f, indent=2)
         return data
 
     def get_horaria(self):
         return self.__get_data('/horaria')
+        template = Data(**{k: None for k in Data._fields})
+        datos: dict[tuple[str, MinMax], Data] = {}
+
+        def _add(fecha: str, periodo: MinMax, **kwargs):
+            k = (fecha, periodo)
+            i = datos.get(k, template._replace(fecha=fecha, periodo=periodo))
+            i = i._replace(**kwargs)
+            datos[k] = i
+
+        for d in data['dia']:
+            f = d['fecha']
+            for k, v in d.items():
+                if not isinstance(v, list):
+                    continue
+                for i in v:
+                    p = MinMax(i['periodo'], i['periodo']+1)
+                    key = k
+                    val = None
+                    if k == "vientoAndRachaMax":
+                        if "velocidad" in i:
+                            val = i['velocidad']
+                            key = "viento"
+                        else:
+                            val = i['value']
+                            key = "rachaMax"
+                    else:
+                        val = i['value']
+                    if val is None:
+                        raise ValueError(f"{k} -> {v}")
+                    if k in ("temperatura", "sensTermica", "humedadRelativa"):
+                        v = MinMax(v, v)
+                    _add(f, p, **{key: val})
+        return tuple(datos.values())
 
     def get_diaria(self):
         return self.__get_data('/diaria')
+    
+    def get_prediccion(self):
+        horaria = self.get_horaria()
+        diaria = self.get_diaria()
 
 
 if __name__ == "__main__":
     load_env()
     m = Meteo(28079)
-    d = m.get_diaria()
-    d = m.get_horaria()
+    d = m.get_prediccion()
