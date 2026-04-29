@@ -7,10 +7,19 @@ from time import time
 import re
 from typing import NamedTuple
 from time import sleep
+from types import MappingProxyType
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from collections import defaultdict
+
+
+def gNow():
+    z = ZoneInfo("Europe/Madrid")
+    return datetime.now(z)
 
 
 chdir(dirname(abspath(__file__)))
-
+re_sp = re.compile(r"\s+")
 
 class MinMax(NamedTuple):
     min: float
@@ -18,20 +27,20 @@ class MinMax(NamedTuple):
 
 
 class Data(NamedTuple):
-    fecha: str
-    periodo: MinMax
     # Diaria/Horaria: Descripción del estado del cielo
     estadoCielo: str
     # Horaria: Milímetros (mm) de precipitación durante la hora anterior
-    precipitacion: float
+    # precipitacion: float
     # Diaria/Horaria: % de probabilidad de precipitación
     probPrecipitacion: int
     # Horaria: % de probabilidad de tormenta
     probTormenta: int
-    # Horaria: milímetros (mm) de nieve que se prevé que caiga durante la hora anterior
-    nieve: float
     # Horaria: % de probabilidad de precipitación de nieve
     probNieve: int
+    # Horaria: milímetros (mm) de nieve que se prevé que caiga durante la hora anterior
+    # nieve: float
+    # Diaria: metros (m) de nieve
+    # cotaNieveProv: float
     # Horaria: Grados celsius
     # Diaria: [Min-Max] Grados celsius
     temperatura: MinMax
@@ -44,9 +53,13 @@ class Data(NamedTuple):
     # Diaria/Horaria: km/h viento
     viento: int
     # Diaria/Horaria: km/h racha máxima
-    rachaMax: int
+    # rachaMax: int
     # Diaria: Índice ultravioleta máximo
-    uvMax: int
+    # uvMax: int
+
+    @classmethod
+    def template(cls):
+        return cls(**{k: None for k in cls._fields})
 
 
 def load_env(path=".env"):
@@ -103,10 +116,21 @@ def _parse(obj, key: str = None):
         return new_obj
     if isinstance(obj, str):
         obj = obj.strip()
+        if key in ("elaborado", "fecha", "periodo"):
+            obj = re_sp.sub("", obj)
         if len(obj) == 0:
             return None
         if key in ("elaborado", "fecha"):
             return obj.replace("T", " ")[:16 if key == "elaborado" else 10]
+        if key == "periodo":
+            if len(obj) == 4:
+                return obj[:2]+'-'+obj[2:]
+            if len(obj) == 2:
+                v = int(obj)
+                return f"{v:02d}-{v+1:02d}"
+            if not re.match(r"^\d{2}-\d{2}$", obj):
+                raise ValueError(obj)
+            return obj
         return _to_num(obj)
     return obj
 
@@ -168,7 +192,7 @@ class Meteo:
         makedirs(dirname(file), exist_ok=True)
         with open(file, "w") as f:
             json.dump(new_data, f, indent=2)
-        return data
+        return new_data
 
     def __parse_data(self, data: dict):
         data = _parse(data)
@@ -214,50 +238,181 @@ class Meteo:
         return data
 
     def get_horaria(self):
-        return self.__get_data('/horaria')
-        template = Data(**{k: None for k in Data._fields})
-        datos: dict[tuple[str, MinMax], Data] = {}
+        data = self.__get_data('/horaria')
+        template = Data.template()
+        datos: dict[str, Data] = {}
 
-        def _add(fecha: str, periodo: MinMax, **kwargs):
-            k = (fecha, periodo)
-            i = datos.get(k, template._replace(fecha=fecha, periodo=periodo))
+        def _add(k: str, **kwargs):
+            i = datos.get(k, template)
             i = i._replace(**kwargs)
             datos[k] = i
 
-        for d in data['dia']:
-            f = d['fecha']
-            for k, v in d.items():
-                if not isinstance(v, list):
+        for fc, d in data['prediccion'].items():
+            for key, v in d.items():
+                if key not in Data._fields:
                     continue
                 for i in v:
-                    p = MinMax(i['periodo'], i['periodo']+1)
-                    key = k
+                    val = i['value']
+                    pr = i['periodo']
+                    if val is None:
+                        raise ValueError(f"{k} -> {v}")
+                    #if key in ("precipitacion", "nieve"):
+                    #    a, b = map(int, pr.split("-"))
+                    #    pr = f"{a-1:02d}-{b-1:02d}"
+                    if key in ("temperatura", "sensTermica", "humedadRelativa"):
+                        val = MinMax(val, val)
+                    _add(f"{fc} {pr}", **{key: val})
+        return MappingProxyType(dict(sorted(datos.items())))
+
+    def get_diaria(self):
+        data = self.__get_data('/diaria')
+        template = Data.template()
+        datos: dict[str, Data] = {}
+
+        def _add(k: str, **kwargs):
+            i = datos.get(k, template)
+            i = i._replace(**kwargs)
+            datos[k] = i
+
+        for fc, d in data['prediccion'].items():
+            for key, v in d.items():
+                if key not in Data._fields:
+                    continue
+                if isinstance(v, dict):
+                    v = [v]
+                for i in v:
+                    p = i.get("periodo", "00-24")
                     val = None
-                    if k == "vientoAndRachaMax":
-                        if "velocidad" in i:
-                            val = i['velocidad']
-                            key = "viento"
-                        else:
-                            val = i['value']
-                            key = "rachaMax"
+                    is_minmax = ("temperatura", "sensTermica", "humedadRelativa")
+                    if key in is_minmax:
+                        val = MinMax(i["minima"], i["maxima"])
                     else:
                         val = i['value']
                     if val is None:
-                        raise ValueError(f"{k} -> {v}")
-                    if k in ("temperatura", "sensTermica", "humedadRelativa"):
-                        v = MinMax(v, v)
-                    _add(f, p, **{key: val})
-        return tuple(datos.values())
-
-    def get_diaria(self):
-        return self.__get_data('/diaria')
+                        raise ValueError(f"{key} -> {v}")
+                    _add(f"{fc} {p}", **{key: val})
+                    for x in i.get("dato", tuple()):
+                        h = x['hora']
+                        val = x['value']
+                        if key in is_minmax:
+                            val = MinMax(val, val)
+                        if val is None:
+                            raise ValueError(f"{key} -> {v}")
+                        _add(f"{fc} {h:02d}-{h+1:02d}", **{key: val})
+        return MappingProxyType(dict(sorted(datos.items())))
     
     def get_prediccion(self):
+        datos: dict[str, Data] = {}
         horaria = self.get_horaria()
         diaria = self.get_diaria()
+        for k in sorted(set(horaria.keys()).union(diaria.keys())):
+            datos[k] = self.__merge(
+                k,
+                horaria.get(k),
+                diaria.get(k)
+            )
+        return MappingProxyType(datos)
+    
+    def __merge(self, p: str, h: Data, d: Data):
+        if (h, d) == (None, None):
+            raise ValueError()
+        if None in (h, d):
+            return h or d
+        a, b = map(int, p.split()[-1].split("-"))
+        _h = h._asdict()
+        _d = d._asdict()
+        obj = {}
+        for k in sorted(set(_h.keys()).union(_d.keys())):
+            vh = _h.get(k)
+            vd = _d.get(k)
+            if None in (vh, vd):
+                obj[k] = vd or vh
+                continue
+            if vh == vd:
+                obj[k] = vd
+                continue
+            if b == a+1:
+                obj[k] = vh
+                continue
+            raise ValueError(f"{p} {k} {vh} {vd}")
+        return Data(**obj)
+    
+    def get_day(self, fch: str):
+        data = {k: v for k, v in self.get_prediccion().items() if k.startswith(f"{fch} ")}
+
+        data_hour: dict[int, dict[str, MinMax]] = defaultdict(dict)
+        for k, v in data.items():
+            _, p = k.split()
+            x1, x2 = map(int, p.split("-"))
+            for k, mm in v._asdict().items():
+                if not isinstance(mm, MinMax):
+                    continue
+                for i in range(x1, x2+1):
+                    obj = data_hour.get(i, dict())
+                    old = obj.get(k)
+                    if old is None:
+                        obj[k] = mm
+                    else:
+                        obj[k] = MinMax(min(old.min, mm.min), max(old.max, mm.max))
+                    data_hour[i] = obj
+
+        def _get(f: str, a: int, b: int):
+            val: MinMax | None = None
+            for h in range(a, b+1):
+                v = data_hour.get(h, dict()).get(f)
+                if v is None:
+                    continue
+                if val is None:
+                    val = v
+                else:
+                    val = MinMax(min(val.min, v.min), max(val.max, v.max))
+            return val
+        
+        r: dict[str, Data] = dict()
+        for f, v in data.items():
+            _, k = f.split()
+            a, b = map(int, k.split("-"))
+            if v.temperatura is None:
+                v = v._replace(temperatura=_get('temperatura', a, b))
+            if v.sensTermica is None:
+                v = v._replace(sensTermica=_get('sensTermica', a, b))
+            if v.humedadRelativa is None:
+                v = v._replace(humedadRelativa=_get('humedadRelativa', a, b))
+            r[k] = v
+
+        return r
+
+    def get_period(self, fch: str):
+        f, p = fch.split()
+        if p in ("00-12", "12-24", "00-24"):
+            return self.get_day(f)[p]
+        return self.get_prediccion()[fch]
+
+    def get(self):
+        now = gNow()
+        today = now.strftime("%Y-%m-%d")
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        dates = []
+        dates.append(f"{today} {now.hour:02d}-{now.hour+1:02d}")
+        if now.hour <= 20:
+            dates.append(f"{today} 20-21")
+        if now.hour <= 10:
+            dates.append(f"{today} 00-12")
+            dates.append(f"{today} 12-24")
+        elif now.hour >= 21:
+            dates.append(f"{tomorrow} 00-12")
+            dates.append(f"{tomorrow} 12-42")
+        else:
+            dates.append(f"{today} 12-24")
+            dates.append(f"{tomorrow} 00-24")
+        r: dict[str, Data] = {}
+        for d in dates:
+            r[d] = self.get_period(d)
+        return MappingProxyType(r)
 
 
 if __name__ == "__main__":
     load_env()
     m = Meteo(28079)
-    d = m.get_prediccion()
+    d = m.get()
+    print(*d.items(), sep="\n")
