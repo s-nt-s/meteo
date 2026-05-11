@@ -81,6 +81,8 @@ def _parse(obj, key: str = None):
         obj = obj.strip()
         if len(obj) == 0:
             return None
+        if key in ("periodo", "hora"):
+            return obj
         return _to_num(obj)
     return obj
 
