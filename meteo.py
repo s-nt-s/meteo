@@ -548,6 +548,41 @@ class Meteo:
             ahora.append(f"{d.viento} km/h viento")
         return ", ".join(ahora)
 
+    def get_timeline(self, dt: Optional[datetime] = None):
+        if dt is None:
+            dt = datetime.now()
+        arr: list[Periodo | Hora] = []
+        fch = dt.strftime("%Y-%m-%d")
+        hour = dt.hour
+        for k, v in self.data.prediccion.items():
+            if k < fch:
+                continue
+            if k > fch:
+                arr.extend(v._asdict().values())
+                continue
+            for kk, vv in v._asdict().items():
+                if kk[0] == "h":
+                    if int(kk[1:]) >= hour:
+                        arr.append(vv)
+                    continue
+                a, z = map(int, kk[1:].split("_"))
+                if a <= hour < z:
+                    arr.append(vv)
+
+        def _sort(x: Periodo | Hora):
+            isH = isinstance(x, Hora)
+            if isH:
+                return (isH, x.label)
+            fch, p = x.label.split(None, 1)
+            a, z = map(int, p[1:].split("_"))
+            diff = z-a
+            return (isH, fch, a, diff, z)
+
+        return tuple(sorted(
+            (x for x in arr if x is not None),
+            key=_sort
+        ))
+
 
 def getLevel(v: int):
     if v == 0:
@@ -558,6 +593,8 @@ def getLevel(v: int):
 
 
 if __name__ == "__main__":
+    import sys
+
     DEF_LOCALIDAD = 28079
     parser = argparse.ArgumentParser(
         description='Muestra la predicción del tiempo',
@@ -568,6 +605,12 @@ if __name__ == "__main__":
         action='count',
         default=0,
         help='Nivel de log'
+    )
+    parser.add_argument(
+        '--lluvia',
+        type=int,
+        default=0,
+        help='Imprimir solo información de lluvia si supera cierto porcentaje'
     )
     parser.add_argument(
         'localidad',
@@ -587,4 +630,7 @@ if __name__ == "__main__":
     )
 
     m = Meteo(args.localidad or DEF_LOCALIDAD)
+    if args.lluvia > 0:
+        print(*m.get_timeline(), sep="\n")
+        sys.exit(0)
     m.print()
