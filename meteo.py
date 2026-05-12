@@ -546,7 +546,7 @@ class Meteo:
             ahora.append(f"{a.humedad_relativa} % humedad")
         if d and d.viento:
             ahora.append(f"{d.viento} km/h viento")
-        return ", ".join(ahora)
+        return ", ".join(x for x in ahora if x is not None)
 
     def get_timeline(self, dt: Optional[datetime] = None):
         if dt is None:
@@ -631,6 +631,17 @@ if __name__ == "__main__":
 
     m = Meteo(args.localidad or DEF_LOCALIDAD)
     if args.lluvia > 0:
-        print(*m.get_timeline(), sep="\n")
+        lluvia: list[Periodo] = []
+        for x in m.get_timeline():
+            if not isinstance(x, Periodo) or x.prob_precipitacion is None:
+                continue
+            if x.prob_precipitacion >= args.lluvia:
+                lluvia.append(x)
+        if lluvia:
+            size = max(map(len, map(str, (x.prob_precipitacion for x in lluvia))))
+            line = "{} {:%s}%% {}" % size
+            for x in lluvia:
+                lb = x.label.replace(" p", " ").replace("_", "-")
+                print(line.format(lb, x.prob_precipitacion, x.estado_cielo or 'lluvia'))
         sys.exit(0)
     m.print()
