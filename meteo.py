@@ -10,11 +10,13 @@ from types import MappingProxyType
 from datetime import datetime, timedelta, date
 import logging
 import argparse
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 re_sp = re.compile(r'\s+')
 ROOT_DIR = Path(__file__).absolute().parent
+WD = ('L', 'M', 'X', 'J', 'V')
 
 
 def _h1(x: str, w: int):
@@ -188,6 +190,11 @@ class Periodo(NamedTuple):
     humedad_relativa_min: Optional[int] = None
     humedad_relativa_max: Optional[int] = None
 
+    def get_periodo(self):
+        arr = tuple(map(int, re.findall(r"\d+", self.label)))
+        dt = date(arr[0], arr[1], arr[2])
+        return dt, arr[3], arr[4]
+
     def print(self):
         print(f"Estado del cielo: {self.estado_cielo}")
         print(f"Temp. min./max.:  {self.temperatura} °C")
@@ -254,6 +261,11 @@ class Hora(NamedTuple):
     temperatura: int
     sens_termica: int
     humedad_relativa: int
+
+    def get_periodo(self):
+        arr = tuple(map(int, re.findall(r"\d+", self.label)))
+        dt = date(arr[0], arr[1], arr[2])
+        return dt, arr[3]
 
     def temp(self):
         if self.temperatura == self.sens_termica:
@@ -583,6 +595,51 @@ class Meteo:
             key=_sort
         ))
 
+    def print_lluvia(self, prob: int, dt: Optional[datetime] = None):
+        lluvia: list[tuple[date, int, Periodo]] = []
+        for x in m.get_timeline():
+            if not isinstance(x, Periodo) or x.prob_precipitacion is None:
+                continue
+            if x.prob_precipitacion >= prob:
+                lluvia.append(x)
+        if len(lluvia) == 0:
+            return
+
+        def _sort(x: Periodo):
+            d, a, z = x.get_periodo()
+            return (d, z-a, -x.prob_precipitacion, z, x)
+    
+        dt_a_z: dict[date, set[tuple[int, int]]] = defaultdict(set)
+        ok_lluvia: list[Periodo] = []
+        for x in sorted(lluvia, key=_sort):
+            d, a, z = x.get_periodo()
+            ok = True
+            for old_a, old_z in dt_a_z[d]:
+                if a <= old_a and old_z <= z:
+                    ok = False
+            if ok:
+                dt_a_z[d].add((a, z))
+                ok_lluvia.append(x)
+
+        size = max(map(len, map(str, (x.prob_precipitacion for x in lluvia))))
+        line = "{w}-{d:02d} {text} {p:%s}%% {c}" % size
+        lines: str = []
+        for x in ok_lluvia:
+            d, a, z = x.get_periodo()
+            text = f"[{a:02d}-{z:02d}]"
+            ln = line.format(
+                text=text,
+                w=WD[d.weekday()],
+                a=a,
+                z=z,
+                d=d.day,
+                p=x.prob_precipitacion,
+                c=x.estado_cielo or 'lluvia'
+            )
+            if ln not in lines:
+                lines.append(ln)
+        print(*lines, sep="\n")
+
 
 def getLevel(v: int):
     if v == 0:
@@ -631,17 +688,6 @@ if __name__ == "__main__":
 
     m = Meteo(args.localidad or DEF_LOCALIDAD)
     if args.lluvia > 0:
-        lluvia: list[Periodo] = []
-        for x in m.get_timeline():
-            if not isinstance(x, Periodo) or x.prob_precipitacion is None:
-                continue
-            if x.prob_precipitacion >= args.lluvia:
-                lluvia.append(x)
-        if lluvia:
-            size = max(map(len, map(str, (x.prob_precipitacion for x in lluvia))))
-            line = "{} {:%s}%% {}" % size
-            for x in lluvia:
-                lb = x.label.replace(" p", " ").replace("_", "-")
-                print(line.format(lb, x.prob_precipitacion, x.estado_cielo or 'lluvia'))
+        m.print_lluvia(args.lluvia)
         sys.exit(0)
     m.print()
