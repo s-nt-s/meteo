@@ -21,6 +21,7 @@ def gNow():
 chdir(dirname(abspath(__file__)))
 re_sp = re.compile(r"\s+")
 
+
 class MinMax(NamedTuple):
     min: float
     max: float
