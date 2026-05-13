@@ -627,17 +627,22 @@ class Meteo:
                 ok_lluvia.append(x)
 
         size = max(map(len, map(str, (x.prob_precipitacion for x in lluvia))))
-        line = "{w}-{d:02d} {text} {p:%s}%% {c}" % size
+        wday = "{w}-{d:02d}"
+        line = "{wday} {text} {p:%s}%% {c}" % size
         lines: str = []
+        done: set[date] = set()
         for x in ok_lluvia:
             d, a, z = x.get_periodo()
+            wdy = "    "
+            if d not in done:
+                done.add(d)
+                wdy = wday.format(w=WD[d.weekday()], d=d.day)
             text = f"[{a:02d}-{z:02d}]"
             ln = line.format(
+                wday=wdy,
                 text=text,
-                w=WD[d.weekday()],
                 a=a,
                 z=z,
-                d=d.day,
                 p=x.prob_precipitacion,
                 c=x.estado_cielo or 'lluvia'
             )
