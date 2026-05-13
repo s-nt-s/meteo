@@ -605,8 +605,17 @@ class Meteo:
         for x in m.get_timeline():
             if not isinstance(x, Periodo) or x.prob_precipitacion is None:
                 continue
-            if x.prob_precipitacion >= prob:
-                lluvia.append(x)
+            if x.prob_precipitacion < prob:
+                continue
+            if re.search(
+                r'lluvia escasa',
+                x.estado_cielo
+            ) and not re.search(
+                r'tormenta',
+                x.estado_cielo
+            ):
+                continue
+            lluvia.append(x)
         if len(lluvia) == 0:
             return
 
