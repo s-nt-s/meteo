@@ -57,7 +57,7 @@ def _trim(s: str | ET.Element | None) -> str:
     if s is None:
         return None
     s = re_sp.sub(" ", s).strip()
-    if len(s) == 0:
+    if len(s) == 0 or s in ("nodato", ):
         return None
     return s
 
